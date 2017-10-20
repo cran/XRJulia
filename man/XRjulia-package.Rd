@@ -1,3 +1,4 @@
+
 \name{XRjulia-package}
 \alias{XRjulia-package}
 \alias{XRjulia}
@@ -6,8 +7,8 @@
   Structured Interface to Julia
 }
 \description{
-A Julia interface structured according to the general
-form described in package XR and the book (in progress)
+An interface to the 'julia' language structured according to the general
+form described in package XR and the book
 "Extending R"
 }
 \author{
@@ -17,8 +18,8 @@ Maintainer: John Chambers <jmc@stat.stanford.edu>
 
 }
 \references{
- Chambers, John M. (book in progress)
-\emph{Extending R}
+ Chambers, John M.
+\emph{Extending R} Chapman & Hall/CRC 2016.
 }
 
 \keyword{ package }

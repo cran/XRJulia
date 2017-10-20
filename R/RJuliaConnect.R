@@ -61,12 +61,15 @@ JuliaInterface$methods(
                                juliaFolder <- system.file("julia", package = .packageName)
                                juliaStart <-  system.file("julia","RJuliaJSON.jl", package = .packageName)
                                Sys.setenv(RJuliaPort=port, RJuliaHost = host, RJuliaSource=juliaFolder)
-                               if(host == "localhost")
-                                 if (.Platform$OS.type == "windows") {
-                                   base::system(paste0(julia_bin, " ", juliaStart), wait = FALSE)
-                                 } else {
-                                   base::system(paste0(julia_bin, " < ", juliaStart), wait = FALSE)
-                                 }
+                               if(host == "localhost") {
+                                   if(!testJSON(julia_bin)) { # try to add the package
+                                       jsonAdd <- system.file("julia","addJSON.jl", package = .packageName)
+                                       base::system(juliaCMD(julia_bin, jsonAdd))
+                                       if(!testJSON(julia_bin))
+                                           stop("No JSON module in Julia and unable to add:  try in julia")
+                                   }
+                                   base::system(juliaCMD(julia_bin, juliaStart), wait = FALSE)
+                               }
                            }
                            ## else, the Julia process should have been started and have called accept()
                            ## for the chosen port
@@ -120,7 +123,7 @@ be the simple strings or logical value expected.'
         value
     },
     ServerQuit = function(...) {
-        cmd <- jsonlite::toJSON("quit")
+        cmd <- jsonlite::toJSON("quit") # NB: this is the *task* quit in XRJulia, not the Julia quit() function
         writeLines(cmd, connection) # don't expect an answer; the process will exit
         close(connection)
     },
@@ -261,12 +264,25 @@ RJulia <- function(...)
 #' setting environment variable \code{JULIA_BIN}; otherwise, the function looks in various conventional locations
 #' and if that doesn't work, runs a shell command to look for \code{julia}.
 #' @return The location as a character string, unless \code{test} is \code{TRUE}, in which case success or failure
-#' is returned, and the location found (or the empty string) is saved as the environment varialbe.
+#' is returned, and the location found (or the empty string) is saved as the environment variable.
+#' Note that in this case, \code{FALSE} is returned if the Julia package \code{JSON} has not been added.
+#' 
 #' If \code{test} is \code{FALSE}, failure to find a Julia
 #' in the current system is an error.
 #' @param test Should the function test for the existence of the application.  Default \code{FALSE}. Calling with
 #' \code{TRUE} is useful to bullet-proof examples or tests for the absence of Julia. If the test search succeeds,
 #' the location is saved in environment variable \code{JULIA_BIN}.
+#' @section On Mac OS X:
+#' Installing Julia in the usual way does not put the command line version in a
+#' standard location, but instead in a folder under \code{/Applications}.
+#' Assuming one wants to have Julia available from the command line,
+#' creating a symbolic link to it in \code{/usr/local/bin} is a standard approach.
+#' If the current version of Julia is \code{0.6}:
+#'
+#' \code{sudo ln -s /Applications/Julia-0.6.app/Contents/Resources/julia/bin/julia /usr/local/bin/julia}
+#'
+#' If for some reason you did not want this to be available,  set the shell variable
+#' \code{JULIA_BIN} to the first file in the command, the one in \code{/Applications}.
 findJulia <- function(test = FALSE) {
     ## See if a location for the Julia executable has been specified
     ## environment variables JULIA_BIN or JULIA_SRC
@@ -294,10 +310,23 @@ findJulia <- function(test = FALSE) {
             stop("No julia executable in search path and JULIA_BIN environment variable not set")
     }
     if(test)
-        nzchar(envvar)
+        nzchar(envvar)  && testJSON(envvar) # to protect examples from long delay
     else
         envvar
 }
+
+## command to run a julia file.
+## Needs to allow for a blank in the Windows location ("Program Files")
+juliaCMD <- function(julia_bin, testFile)
+    if (.Platform$OS.type == "windows") paste0('"',julia_bin,'" ', testFile) else paste(julia_bin, "<", testFile)
+
+testJSON <- function(julia_bin) {
+    testFile <- system.file("julia", "testJSON.jl", package = "XRJulia")
+    cmd <-  juliaCMD(julia_bin, testFile)
+    hasJSON <- base::system(cmd, intern = TRUE)
+    identical("YES", hasJSON)
+}
+    
 
 ## the base for the port used by JuliaInterface objects
 ## This value should be overwritten by a random choice in the load action
@@ -348,11 +377,11 @@ setMethod("asServerObject", c("array", "JuliaObject"),
     onames <- names(object)
     vals <- sapply(object, function(x) asServerObject(x, prototype))
     if(is.null(onames))
-        paste("{", paste(vals, collapse = ", "), "}")
+        paste("[", paste(vals, collapse = ", "), "]")
     else {
         onames <- XR::nameQuote(XR::fillNames(onames))
-        paste("{", paste(onames, vals, sep = " => ", collapse = ", "),
-              "}")
+        paste("Dict(", paste(onames, vals, sep = " => ", collapse = ", "),
+              ")")
     }
 }
 
