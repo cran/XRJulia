@@ -1,6 +1,6 @@
-a347f69d8378e1785f20a1a18f78c0b9 *DESCRIPTION
+09019b9fd5a0adfcb511ac5b640ae72a *DESCRIPTION
 cdd7a576494e5962726e057b163ab185 *NAMESPACE
-824bf65419be13081cedc777bbc40954 *R/RJuliaConnect.R
+baa0a4ea28357fc36e2610668676f376 *R/RJuliaConnect.R
 62bdce39a88658941bc250815d446ee5 *README.md
 04130b523467727e206bd0aac6c53f83 *inst/doc/Chapter_XRJulia.pdf
 a946d991b542c2eab52ea550679e57fb *inst/julia/RJuliaJSON.jl
@@ -19,11 +19,11 @@ c60540ae6fe576b488f5e4ba4ad5b8a3 *inst/tests/testClient.jl
 dab1a8f32bb08fe4a88d91451c89d2c3 *man/JuliaInterface-class.Rd
 2592d26eddb2f084c9f53565dace4b00 *man/JuliaObject-class.Rd
 1e9125d8d347020792c280dc8f7605cf *man/RJulia.Rd
-56f632e2d663d97c7e0477945373816a *man/XRjulia-package.Rd
+52c519e803f1e3f7b43e411c3d0a3468 *man/XRjulia-package.Rd
 dd2649eed1e77d6faa28d776af3b41e3 *man/asServerObject-ANY-JuliaObject-method.Rd
-f11262e1773a8c794960969050540051 *man/findJulia.Rd
+d3d943ccf850b5516f996a36c254f095 *man/findJulia.Rd
 dac19a255735e4acf5db68babd9a67c4 *man/from_Julia-class.Rd
-f5cd25545172720f5b3bd1ff495c6907 *man/functions.Rd
+c9fea89ef725a7553e64e49444fbc467 *man/functions.Rd
 9484096571c8080e80f6b4d129cde7a4 *man/juliaClassDef.Rd
 61ae07560f6f865ae14f6507944fdd91 *man/noScalar.Rd
 8ae2af1056f093e67912ee76139512fb *man/proxyJuliaObjects.Rd

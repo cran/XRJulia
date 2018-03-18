@@ -1,4 +1,3 @@
-
 \name{XRjulia-package}
 \alias{XRjulia-package}
 \alias{XRjulia}
@@ -7,8 +6,8 @@
   Structured Interface to Julia
 }
 \description{
-An interface to the 'julia' language structured according to the general
-form described in package XR and the book
+A Julia interface structured according to the general
+form described in package XR and the book (in progress)
 "Extending R"
 }
 \author{
