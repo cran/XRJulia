@@ -4,101 +4,131 @@
 #' in the XR  package.  Proxy functions and classes allow use of the interface with no explicit
 #' reference to the evaluator.  The function \code{RJulia()} returns an evaluator object.
 #'
-#' @field port,host The parameters for communicating with the Julia evaluator.
-#' @field julia\_bin The command for starting a Julia process.
-#' @field connection The connection object through which commands are sent to Julia
+#' @field host The remote host, as a character string.  By default this will be the local host, and initializing the evalutor
+#' will set the field to "localhost".
+#' @field port The port number for commuicating to Julia from this evalutor.
+#' By default, the port is set by adding the evaluator number-1 to a base port number.
+#' By default the base port is randomly chosen at package load time (this strategy may change).
+#'
+#' The port may be controlled in two ways.  If you know a good range or set of ports, it will
+#' be preferrable to supply unique port values (integer) in the initialization call.
+#' A less direct way is set the R option "JuliaBasePort", which will then be used as the base port.
+#' Since evaluator numbers are used to increment the port, the call to \code{\link{options}} should normally come before 
+#' initializing the first Julia evaluator.
+#' @field julia_bin The location for an executable version of the Julia interpreter.  By default, this assumes there is a file named \code{"julia"}
+#' on the command-line  search path.  If Julia is not usable from the command line or if you want to run with a different version, supply
+#' the executable file name as this argument.  It is also possible to set the location for all evaluators by setting the shell variable
+#' \code{JULIA_BIN} to this location \emph{before} starting R.
+#' @field connection The connection object through which commands are sent to Julia.  Normally will be created by the initialization
+#' of the evaluator.  Should only be supplied as a currently
+#' open socket on which to communicate with the Julia interpreter.
+#' @field serverWrapup a vector of actions for the ServerEval to take after evaluation.  Used to clean up after special operations,
+#' such as sending large objects to Julia.
+#' @field largeObject Vectors with length bigger than this will be handled specially.  See \link{largeVectors}.  Default currently 1000.  To change this, call \code{\link{juliaOptions}()}
+#' to set option \code{largeObject}.
+#' @field fileBase a pattern for file names that the evaluator will use in Julia for various data transfer
+#' and other purposes.  The evaluator appends "_1", "_2", etc.  To change this, call \code{\link{juliaOptions}()}
+#' to set option \code{fileBase}.  It is initiaized to an R tempfile with pattern \code{"Julia"}.
 JuliaInterface <- setRefClass("JuliaInterface",
                       fields = c( port = "integer", host = "character",
                           julia_bin = "character",
-                          connection = "ANY"),
+                          connection = "ANY",
+                          serverWrapup = "character",
+                          contains = "Interface",
+                          largeObject = "integer",
+                          fileBase = "character"),
                       contains = "Interface")
 
 JuliaInterface$methods(
-    initialize = function(..., startJulia = identical(host, "localhost"), verbose = FALSE){
-        'The initialize method attempts to open a socket unless the "connection" field in the call is an open socket.  Else, if the host is the local host an attempt is made to start a Julia process.  See the documentation of the interface class for details.'
-                           languageName <<- "Julia"
-                           prototypeObject <<- JuliaObject()
-                           callSuper(...) # initialize object & register it
-                           if(is(connection, "connection")) {
-                               if(is(connection, "sockconn") && isOpen(connection))
-                                   return()
-                               else {
-                                   if(!is(connection, "sockconn"))
-                                       msg <- gettextf("got class %s",dQuote(class(connection)))
-                                   else
-                                       msg <- "Socket not open"
-                                   stop(gettextf(
-                                       "Argument connection= should be an open socket connection: %s",
-                                       msg))
-                               }
+                   initialize = function(..., startJulia, verbose = FALSE)
+                   {
+                       'The initialize method attempts to open a socket unless the "connection" field in the evaluator is an open socket.  Else, if the host is the local host an attempt is made to start a Julia process.  See the documentation of the interface class for details.'
+                       languageName <<- "Julia"
+                       prototypeObject <<- JuliaObject()
+                       prototypeObject$.ev <<- .self
+                       largeObject <<- 1000L
+                       fileBase <<- tempfile(pattern = "Julia")
+                       callSuper(...) # initialize object & register it
+                       if(is(connection, "connection")) {
+                           if(is(connection, "sockconn") && isOpen(connection))
+                               return()
+                           else {
+                               if(!is(connection, "sockconn"))
+                                   msg <- gettextf("got class %s",dQuote(class(connection)))
+                               else
+                                   msg <- "Socket not open"
+                               stop(gettextf(
+                                   "Argument connection= should be an open socket connection: %s",
+                                   msg))
                            }
-                           ## start a julia proc.
-                           if(length(port) == 0 || is.na(port)) { # uninitialized
-                               xport <- getOption("JuliaPort")
-                               if(length(xport) == 0 ||is.na(xport))
-                                   xport <- basePort + XR::evaluatorNumber(.self)
-                               port <<- as.integer(xport)
-                               startJulia <- TRUE
-                           }
-                           if(startJulia) {
-                               ## the equivalent of AddToPath(), done in Julia
-                               julia_lib <- system.file("julia",package = "XRJulia")
-                               Sys.setenv(RJULIA_LIB = julia_lib)
-                               if(!(julia_lib %in% serverPath))
-                                   serverPath <<- c(serverPath, julia_lib)
-                           }
-                           if(length(host) == 0)  ## never set
-                               host <<- "localhost"
+                       }
+                       if(missing(startJulia))
+                           startJulia <- length(host) == 0L || identical(host, "localhost")
+                       ## start a julia proc.
+                       if(startJulia && (length(port) == 0L || is.na(port))) {# uninitialized
+                           base <- getOption("JuliaBasePort")
+                           if(is.null(base) || is.na(base))
+                               base <- basePort # value set at package load time
+                           port <<- as.integer(base + XR::evaluatorNumber(.self)) - 1L
+                       }
+                       if(startJulia) {
+                           Sys.setenv(JULIA_JUNK = "This is a silly environment variable\n")  ## just for testing
+                           ## the equivalent of AddToPath(), done in Julia
+                           julia_lib <- system.file("julia",package = "XRJulia")
+                           Sys.setenv(RJULIA_LIB = julia_lib)
+                           if(!(julia_lib %in% serverPath))
+                               serverPath <<- c(serverPath, julia_lib)
+                       }
+                       if(length(host) == 0)  ## never set
+                           host <<- "localhost"
+                       if(identical(host, "localhost") && length(julia_bin) == 0L)
+                               julia_bin <<- findJulia()
+                       if(verbose)
+                           Sys.setenv(JuliaVerbose = 1)
+                       else
+                           Sys.unsetenv("JuliaVerbose")
+                       if(startJulia) {
+                           juliaFolder <- system.file("julia", package = .packageName)
+                           juliaStart <-  system.file("julia","RJuliaJSON.jl", package = .packageName)
+                           Sys.setenv(RJuliaPort=port, RJuliaHost = host, RJuliaSource=juliaFolder)
                            if(identical(host, "localhost")) {
-                               if(length(julia_bin) == 0)
-                                   julia_bin <<- findJulia()
+                               testJSON(julia_bin)
+                               base::system(juliaCMD(julia_bin, juliaStart), wait = FALSE)
                            }
+                       }
+                       ## else, the Julia process should have been started and have called accept()
+                       ## for the chosen port
+                       if(verbose)
+                           cat(gettextf(
+                               "Starting connection to %s on port %d\n", host, port))
+                       for(i in 1:300) {
+                           ## waiting for Julia proc. to establish connection
+                           Sys.sleep(.2)
+                           sc <- tryCatch(socketConnection(host = host, port = port, block = TRUE), error = function(e) e,
+                                          warning = function(w)w)
+                           if(is(sc, "connection"))
+                               break
                            if(verbose)
-                               Sys.setenv(JuliaVerbose = 1)
-                           else
-                               Sys.unsetenv("JuliaVerbose")
-                           if(startJulia) {
-                               juliaFolder <- system.file("julia", package = .packageName)
-                               juliaStart <-  system.file("julia","RJuliaJSON.jl", package = .packageName)
-                               Sys.setenv(RJuliaPort=port, RJuliaHost = host, RJuliaSource=juliaFolder)
-                               if(host == "localhost") {
-                                   if(!testJSON(julia_bin)) { # try to add the package
-                                       jsonAdd <- system.file("julia","addJSON.jl", package = .packageName)
-                                       base::system(juliaCMD(julia_bin, jsonAdd))
-                                       if(!testJSON(julia_bin))
-                                           stop("No JSON module in Julia and unable to add:  try in julia")
-                                   }
-                                   base::system(juliaCMD(julia_bin, juliaStart), wait = FALSE)
-                               }
-                           }
-                           ## else, the Julia process should have been started and have called accept()
-                           ## for the chosen port
-                           if(verbose)
-                               cat(gettextf(
-                                            "Starting connection to %s on port %d\n", host, port))
-                           for(i in 1:300) {
-                               ## waiting for Julia proc. to establish connection
-                               Sys.sleep(.2)
-                               sc <- tryCatch(socketConnection(host = host, port = port, block = TRUE), error = function(e) e,
-                                              warning = function(w)w)
-                               if(is(sc, "connection"))
-                                   break
-                               if(verbose)
-                                   cat(if(i==1) "Waiting." else ".")
-                           }
-                           cat("\n")
-                           if(!is(sc, "connection"))
-                               stop(gettextf("Unable to start Julia connection on port %s: %s",
-                                             port, sc$message))
-                           connection <<- sc
-                           ## now, actions such as setting the path can be performed
-                           startupActions()
-                       })
+                               cat(if(i==1) "Waiting." else ".")
+                       }
+                       cat("\n")
+                       if(!is(sc, "connection"))
+                           stop(gettextf("Unable to start Julia connection on port %s: got the error/warning message \"%s\"",
+                                         port, sc$message))
+                       connection <<- sc
+                       ## now, actions such as setting the path can be performed
+                       startupActions()
+                       ## set some julia options--either defaults or specified in the constructor call.
+                       juliaOptions(largeObject = largeObject, fileBase = fileBase, .ev = .self)
+                   })
 
 ## The definition of Julia-dependent methods
 JuliaInterface$methods(
     ServerEval = function(expr,key = "", get = NA) {
         value <- ServerTask("eval", expr, key, get)
+        on.exit(serverWrapup <<- character())
+        for(action in serverWrapup)
+            base::eval(base::parse(text = action))
         XR::valueFromServer(value, key, get, .self)
     },
     ServerRemove = function(what)
@@ -316,7 +346,7 @@ findJulia <- function(test = FALSE) {
             stop("No julia executable in search path and JULIA_BIN environment variable not set")
     }
     if(test)
-        nzchar(envvar)  && testJSON(envvar) # to protect examples from long delay
+        nzchar(envvar)
     else
         envvar
 }
@@ -324,13 +354,14 @@ findJulia <- function(test = FALSE) {
 ## command to run a julia file.
 ## Needs to allow for a blank in the Windows location ("Program Files")
 juliaCMD <- function(julia_bin, testFile)
-    if (.Platform$OS.type == "windows") paste0('"',julia_bin,'" ', testFile) else paste(julia_bin, "<", testFile)
+    if (.Platform$OS.type == "windows") paste0('"',julia_bin,'" ', testFile) else paste(julia_bin, testFile)
 
 testJSON <- function(julia_bin) {
     testFile <- system.file("julia", "testJSON.jl", package = "XRJulia")
     cmd <-  juliaCMD(julia_bin, testFile)
-    hasJSON <- base::system(cmd, intern = TRUE)
-    identical("YES", hasJSON)
+    if(base::system(cmd)) # error exit from command
+        stop("Unable to continue:  failed to get JSON.  Try Pkg.add() from julia directly")
+    TRUE
 }
     
 
@@ -386,7 +417,7 @@ setMethod("asServerObject", c("array", "JuliaObject"),
         paste("[", paste(vals, collapse = ", "), "]")
     else {
         onames <- XR::nameQuote(XR::fillNames(onames))
-        paste("Dict(", paste(onames, vals, sep = " => ", collapse = ", "),
+        paste("Dict{String, Any}(", paste(onames, vals, sep = " => ", collapse = ", "),
               ")")
     }
 }
@@ -409,9 +440,35 @@ setMethod("asServerObject", c("list", "JuliaObject"),
 
 typeToJulia <- function(object, prototype) {
     switch(typeof(object),
-           complex = paste0("complex(", typeToJSON(Re(object), prototype), ", ",
-           typeToJSON(Im(object), prototype), ")"),
+           ## For complex, Julia requires an explicitly typed array for the real, imaginary parts
+           complex = paste0("complex(Array{Float64,1}(", typeToJSON(Re(object), prototype), ") , Array{Float64,1}(",
+                            typeToJSON(Im(object), prototype), "))"),
+           ## typeToJSON() will create an RData object if there are NA's:  won't parse in Julia
+           ## Instead two work arounds but with warning
+           integer = , logical = if(any(is.na(object))) {
+               warning(gettextf("Julia cannot represent missing values in type %s; converting to double", typeof(object)))
+               typeToJSON(as.numeric(object), prototype)
+           } else typeToJSON(object, prototype),
+           character = { if(any(is.na(object))) {
+               warning("Julia cannot represent missing values in strings; converting to \"<NA>\"")
+               object[is.na(object)] <- "<NA>"
+                         }
+           typeToJSON(object, prototype)},
+           raw = rawToJulia(object, prototype),
            typeToJSON(object, prototype))
+}
+
+notSimpleVector <- function(object)
+    (isS4(object) && !is.null(attr(object, "class"))) ||
+              ## exclude the S4 case where the bit is on to force a JSON array
+                  is.list(attributes(object)) || # S3 class or structure
+                  is.recursive(object)
+
+rawToJulia <- function(object, prototype) {
+    if(length(object) > 1 || isS4(object))
+        paste0("convert(Array{UInt8,1}, ", typeToJSON(as.integer(object), prototype), ")")
+    else
+        paste0("convert(UInt8, ", as.integer(object), ")")
 }
 
 ## NOT Roxygen Default Julia method for asServerObject()
@@ -421,14 +478,118 @@ typeToJulia <- function(object, prototype) {
 ## NOT Roxygen @param prototype The proxy for a prototype of the Julia object, supplied by the evaluator.
 setMethod("asServerObject", c("ANY", "JuliaObject"),
            function(object, prototype) {
-               if((isS4(object) && !is.null(attr(object, "class"))) ||
-              ## exclude the S4 case where the bit is on to force a JSON array
-                  is.list(attributes(object)) || # S3 class or structure
-                  is.recursive(object))
+               if(notSimpleVector(object))
                   .asServerList(XR::objectDictionary(object), prototype)
               else #<FIXME> There are some edge cases and NA is not handled well
                   typeToJulia(object, prototype)
            })
+
+#' Internal Computations for Large Vectors
+#'
+#' @name largeVectors
+#'
+#' @section Sending Large Vectors between R and Julia:
+#' Large vectors will be slow to transfer as JSON, and may fail in Julia.  Internal computations have
+#' been added to transfer vectors of types real, integer, logical and character by more direct
+#' computations when they are large.  The computations and their implementation are
+#' described here.
+#'
+#'
+#' R and Julia both have the concept of numeric (floating point) and integer arrays whose elements have a consistent type and both implement
+#' these (following Fortran) as contiguous blocks in memory, augmented by length or dimension information.
+#' They also both have a mechanism for arrays of character strings, class \code{"character"} in R and array type
+#' \code{Array{String, 1}} in Julia.
+#' Julia has arrays for boolean data; R stores the corresponding \code{logical} as integers.
+#' 
+#' JSON has no such concepts, so interface evaluators using the standard JSON form provided by 'XR' must send such data as a JSON list.  This will
+#' become inefficient for very large data from these classes.  Users have reported failure by Julia to
+#' parse the corresponding JSON.
+#'
+#' The 'XRJulia' package (as of version 0.7.9) implements special code to send vectors to Julia, by
+#' writing an intermediate file that Julia reads.  The actual text sent to Julia is a call to the
+#' relevant Julia function.  The code is triggered within the methods for the \code{asServerObject}
+#' function, so vectors should be transferred this way whether on their own or as part of a larger structure,
+#' such as an array or the column of a data frame.
+#'
+#' Similarly, large arrays to be retrieved in R by the \code{Get()} method or the optional argument \code{.get = TRUE}
+#' will be written to an intermediate file by Julia and read by R.
+#'
+#' As vectors become large, direct transfer becomes \emph{much} faster.  On a not-very-powerful laptop,
+#' vectors of length \code{10^7} transfer in an elapsed time of a few seconds.  Character vectors are slightly
+#' slower than numeric, as explained below, but in all cases it would be hard to do much computation with
+#' the data that did not swamp the cost of transfer.  That said, as always it's more sensible to transfer
+#' data once and then use the corresponding proxy object in later calls.
+#' 
+#' @section Details:
+#' For all vectors, the method uses binary writes and reads, which are defined
+#' in both R and Julia.  No special computationss are needed for numeric, integer, complex and raw.
+#' For these, the R binary representation corresponds to array types in Julia.
+#' The special pseudo-value \code{NA} is defined for vectors in R, but no corresponding concept exists
+#' in Julia.  For numeric and complex vectors, the floating-point pattern \code{NaN} is used.
+#' For all other vectors, a warning is issued and either a numeric object or a special character string is used instead.
+#' 
+#' For logicals, the internal representation in R uses integers.
+#' The Julia code when data is sent from R casts the integer array to a boolean array.
+#' On the return side, the Julia boolean array is converted to integer before writing.
+#'
+#' Character vectors take a little more work, partly because of a weirdness in binary writes
+#' for string arrays in Julia.  Where R character vectors can be written in binary form and then read
+#' back in, writing a \code{String} array in Julia omits the end-of-string character,
+#' effectively writing a single string, from which the array cannot
+#' be recovered.  Communicating the entire vector to Julia requires
+#' that the Julia side uses this information to split the single string resulting from the R binary write
+#' by matching the end-of-string character explicitly
+#' For sending back to R, the Julia code
+#' appends an end-of-string character to each string before writing the array to a file.  This produces the
+#' R format for a binary read of a character vector.
+#'
+#' Two fields in the evaluator object control details.
+#' A large object is defined as a vector of length greater than the integer field \code{largeObject}.
+#' Julia creates intermediate files for sending large arrays to R by appending sequenctial numbers to a
+#' character field \code{fileBase}.  By default, \code{largeObject} and  \code{fileBase} is obtained from
+#' \code{\link{tempfile}()} with pattern \code{"Julia"}. Note that all the files are removed at the end of
+#' the evaluation of the expression sending or getting the relevant objects.
+#'
+#' Since these fields must be known to the Julia evaluator, they should \emph{not} be set directly---this will
+#' have no effect.  Instead call the function \code{\link{juliaOptions}()} with these parameter names.
+#'
+
+setClassUnion("simpleVectorJulia", c("numeric", "integer", "logical", "character", "complex", "raw"))
+
+setMethod("asServerObject", c("simpleVectorJulia", "JuliaObject"),
+          function(object, prototype) {
+              useTypeToJulia <- notSimpleVector(object) # the general rule
+              ## the length test:  KLUDGE alert:  Julia v 0.6 has a bug that prints an erroneous warning the first time on complex
+              useTypeToJulia <- useTypeToJulia || (if(is.complex(object)) length(object) < 2 else 
+                  length(object) < prototype$.ev$largeObject)
+               if(useTypeToJulia)
+                  callNextMethod()
+              else {
+                  file <- tempfile("toJulia")
+                  on.exit(addServerWrapup(gettextf('base::system2("rm","%s")', file)))
+                  writeBin(as.vector(object), file)
+                  gettextf('binaryRVector("%s", "%s", %d)', file, typeof(object), length(object))
+              }
+          })
+
+# no longer used
+## setMethod("asServerObject", c("character", "JuliaObject"),
+##           function(object, prototype) {
+##               n <- length(object)
+##               if(n < prototype$.ev$largeObject || notSimpleVector(object) )
+##                  return(callNextMethod())
+##               file1 <- tempfile("toJulia")
+##               file2 <- tempfile("toJulia")
+##               on.exit(addServerWrapup(gettextf('base::system2("rm","%s")', paste(file1, file2))))
+##               writeChar(as.vector(object), file1, eos = NULL) # write with no trailing \0 bytes
+##               writeBin(nchar(object), file2)
+##               gettextf("readRStrings(\"%s\", \"%s\", %d)", file1, file2, length(object))
+##           })
+
+addServerWrapup <- function(command, .ev = RJulia())
+    .ev$serverWrapup <- c(.ev$serverWrapup,command)
+
+
 
 ## these methods are "copied" from XR only to avoid ambiguity when selecting
 ## Otherwise they score the same as the c("ANY", "JuliaObject") method
@@ -508,6 +669,37 @@ juliaImport <- function( ...,  evaluator) {
         evaluator$Import(...)
 }
 
+#' Get and/or Set Internal Option Parameters in the Julia Evaluator
+#'
+#' The Julia code for an evaluator maintains a dictionary, \code{RJuliaParams}, of named parameters used to control
+#' various evaluation details.  These and any other desired options can be queried and/or set by calls to \code{juliaOptions}.
+#' 
+#' The function behaves essentially like the \code{\link{options}()} function in R itself, returning a list of the current entries
+#' corresponding to unnamed character arguments and setting the parameters named to the value in the corresponding named argument
+#' to \code{juliaOptions}.
+#' If no parameter corresponding to a name has been set, requesting the corresponding returned value is \code{nothing}, \code{NULL} in R.
+#' @param ... arguments to the corresponding method for an evaluator object.
+#' @param .ev The evaluator object to use.  By default, and usually, the current evaluator.
+#' @return A named list of those parameters requested (as unnamed character string arguments).  If none, an empty list.
+#' Note that options are always returned converted to R, not as proxyies.
+juliaOptions <- function(..., .ev = XRJulia::RJulia()) {
+    args <- list(...)
+    toSet <- nzchar(allNames(args))
+    value <- list()
+    if(any(toSet)) {
+        setArgs <- args[toSet]
+        ## check for some special options and set the corresponding field in the evaluator.
+        ## This also has the effect of validating the object's class.
+        for(special in c("largeObject", "fileBase"))
+            if(!is.null(setArgs[[special]]))
+               .ev$field(special, setArgs[[special]])
+        .ev$Call("RJuliaSetParams", setArgs)
+    }
+    if(any(!toSet))
+        value <- .ev$Call("RJuliaGetParams", unlist(args[!toSet]), .get = TRUE)
+    value
+}
+
 
 ## proxy Julia functions
 JuliaFunction <- setClass("JuliaFunction",
@@ -565,19 +757,16 @@ setJuliaClass <- function (juliaType, module = "", fields = character(),
 }
 
 
-## these are stubs for a mechanism to convert Julia arrays of non-standard types in R
-## See the comments on the toR() methods in XRJulia.jl
-doSpecial <- function(typeStr)
-    FALSE
-doSpecialVector <- function(object)
-    NULL
+## a table to convert Julia arrays of non-standard types, not handled by the signature = c("vectorR", "ANY")
+## method for asRObject
+doSpecialVector <- list( raw = function(object) as.raw(unlist(object@data))) # should check, but these came from UInt8
 
 setMethod("asRObject", c("vector_R","JuliaInterface"),
           function (object, evaluator) {
-              if(doSpecial(object@type))
-                  doSpecialVector(object)
+              if(is.function(doSpecialVector[[object@type]]))
+                  doSpecialVector[[object@type]](object)
               else
-                  callNextMethod()
+                  callNextMethod() # signature c("vectorR", "ANY")
           })
 
 #' Class for General Julia Composite Type Objects
@@ -605,3 +794,45 @@ setMethod("initialize", "from_Julia",
         callNextMethod(.Object, ..., referenceClass = TRUE)
     }
 )
+
+## a class for returning large vectors in simple form
+setClass("vector_R_direct", slots = c(file = "character", type = "character", length = "integer"))
+
+setMethod("asRObject", c("vector_R_direct", "JuliaInterface"),
+          function(object, evaluator) {
+              on.exit(base::system(paste("rm ",object@file)))
+              readBin(object@file, object@type, object@length)
+          })
+
+## ## a class for returning long character vectors
+## setClass("character_R_direct", slots = c(stringFile = "character", nbytes = "integer", ncharsFile = "character", length = "integer"))
+
+## setMethod("asRObject", c("character_R_direct", "JuliaInterface"),
+##           function(object, evaluator) {
+##               on.exit(system(paste("rm ",object@stringFile, object@ncharsFile)))
+##               string <- readChar(object@stringFile, object@nbytes, TRUE)
+##               n <- object@length
+##               lens <- readBin(object@ncharsFile, "integer", n)
+##               last <- cumsum(lens)
+##               first <- c(0L, last[-n])+1
+##               substring(string,first,last)
+##           })
+
+#' Get or test the Julia Version information
+#' 
+#' The Julia constant structure \code{VERSION} is returned.
+#'  If \code{test} is \code{TRUE}, only returns a logical testing whether
+#' this version is compatible with \code{XRJulia}.
+#' @param test If \code{TRUE}, tests compatibility
+#'  (currently that the major number is at least \code{1}). Default \code{FALSE}
+#' @param .ev The evaluator object to use.  By default, and usually, the current evaluator.
+#' @return A named list with the
+#' members of the Julia object, the usually relevant ones being \code{"major"}, \code{"minor"} and 
+#' \code{"patch"}. \code{test=TRUE} overrides as described.
+juliaVersion <- function(test = FALSE, .ev = RJulia()) {
+  value <- .ev$Get(as.name("VERSION"))@fields
+  if(test)
+    value$major >= 1L
+  else
+    value
+}

@@ -40,12 +40,15 @@ is used, and one is started if none has been.}
 }}
 
 \examples{
-if(findJulia(test = TRUE)) {
-  set.seed(228)
-  x <- matrix(rnorm(1000),20,5)
-  xm <- juliaSend(x)
-  svdJ <- JuliaFunction("svdfact")
-  sxm <- svdJ(xm)
-  sxm
-}
+  if(findJulia(test = TRUE) ) {
+    ## even so, the Julia may not be valid
+    ## so we catch any errors in the example, mainly to keep CRAN quiet
+    tryCatch( {set.seed(228)
+      x <- matrix(rnorm(1000),20,5)
+      xm <- juliaSend(x)
+      juliaCommand("using LinearAlgebra")
+      svdJ <- JuliaFunction("svd")
+      sxm <- svdJ(xm)
+      sxm
+    }, error = function(e) message("Julia Example error: " ,e$message))}
 }

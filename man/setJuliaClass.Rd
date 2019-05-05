@@ -5,7 +5,8 @@
 \title{Define a Proxy Julia Class (Composite Type)}
 \usage{
 setJuliaClass(juliaType, module = "", fields = character(),
-  where = topenv(parent.frame()), proxyObjectClass = "JuliaObject", ...)
+  where = topenv(parent.frame()), proxyObjectClass = "JuliaObject",
+  ...)
 }
 \arguments{
 \item{juliaType, module}{Strings identifying the composite type and optionally the module containing it. In normal use,

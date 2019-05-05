@@ -15,7 +15,6 @@
 \alias{juliaSerialize}
 \alias{juliaUnserialize}
 \alias{juliaName}
-\alias{juliaImport}
 \title{Function Versions of Methods for Julia Interface evaluators.}
 \usage{
 juliaSource(..., evaluator = RJulia())
@@ -36,7 +35,8 @@ juliaPrint(object, ..., evaluator = XRJulia::RJulia())
 
 juliaEval(expr, ..., evaluator = XR::getInterface(.JuliaInterfaceClass))
 
-juliaCommand(expr, ..., evaluator = XR::getInterface(.JuliaInterfaceClass))
+juliaCommand(expr, ...,
+  evaluator = XR::getInterface(.JuliaInterfaceClass))
 
 juliaCall(expr, ..., evaluator = XR::getInterface(.JuliaInterfaceClass))
 

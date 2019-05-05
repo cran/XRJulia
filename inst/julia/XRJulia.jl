@@ -4,43 +4,6 @@ export RJuliaCommand, toR, RObject, vectorR, conditionToR
 
 import JSON
 
-## special processing for array objects via JSON
-function objectFromJSON(str::String)
-    fromJSONObject(JSON.parse(str))
-end
-
-## Interpreting the parsed JSON representation
-
-function fromJSONObject(object)
-    ## by default, as is (covers scalars, strings)
-    object
-end
-
-function fromJSONObject(object::Array{Any, 1})
-    ## check for a single type of object
-    ## TODO:  should also handle the case that all elements can be converted
-    ## to one type; e.g., integer & float; numeric & string
-    types = Array{Any}(size(object))
-    for i in 1:length(object)
-        types[i] = typeof(object[i])
-    end
-    types = unique(types)
-    if length(types) == 1
-        convert(typeof(Array{types[1]}(1)), object)
-    else
-        object
-    end
-end
-
-## JSON dictionaries are used to encode R classes
-function fromJSONObject(object::Dict{AbstractString,Any})
-    if haskey(object, ".RClass")
-        makeRObject(object)
-    else
-        object
-    end
-end
-
 function makeRObject(object::Dict{AbstractString,Any})
     obj = copy(object)
     RClass = pop!(obj, ".RClass") # must be there
@@ -51,18 +14,20 @@ function makeRObject(object::Dict{AbstractString,Any})
     RObject(RClass, package, Rtype, data, obj)
 end
 
-## tables for converting R type/class to Julia:  NOT CURRENTLY USED
-juliaTypes = Dict{String,DataType}( "integer" => Int64, "numeric" => Float64, "character" => String,
-                "logical" => Bool,  "double" => Float64)
-
-juliaArrayTypes = Dict{String,DataType}( "integer" => Array{Int64,1}, "numeric" => Array{Float64,1},
-                     "character" => Array{String,1},
-                     "logical" => Array{Bool,1}, "double" => Array{Float64,1} )
+## tables for converting R type/class to Julia: see binaryRVector()
+juliaTypes = Dict{String,DataType}( "integer" => Int32, "numeric" => Float64, "character" => String,
+                "logical" => Int32, "complex" => Complex{Float64}, "raw" => UInt8, "double" => Float64)
 
 ### Converting Array{} types in Julia to basic R vector classes (Not actual typeof())
-RTypes = Dict{String, String}("Array{Int64,1}" => "integer", "Array{Float64,1}" => "numeric", "Array{String,1}" => "character",
+RTypes = Dict{String, String}("Array{Int32,1}" => "integer", "Array{Float64,1}" => "numeric", "Array{String,1}" => "character",
           "Array{Complex{Float64},1}" => "complex",
-          "Array{Bool,1}" => "logical", "Array{Any,1}" => "list" )
+          "Array{Bool,1}" => "logical", "Array{Any,1}" => "list", "Array{UInt8,1}" => "raw",
+          "Array{Int64,1}" => "integer") 
+                              
+## the reverse:  making data compatible with R vector types
+forRTypes = Dict{String, DataType}("integer" => Array{Int32,1} , "numeric" => Array{Float64,1} , "character" => Array{String,1},
+          "complex" =>Array{Complex{Float64},1},
+           "logical" =>Array{Bool,1}, "list" => Array{Any,1} )
 
 ## the default method:  No idea what to do; presumably junk on the connectio.
 function RJuliaCommand(command)
@@ -81,7 +46,7 @@ function RJuliaCommand(args::Array{Any,1})
         ## push the args.  Each task is actually called with a known number
         ## of arguments, but the definitions allow for defaults if those make sense
         ee = Expr(:call)
-        aa = Array{Any}(0)
+        aa = Array{Any}(undef, 0)
         push!(aa, f)
         for i in 2:length(args)
             push!(aa, args[i])
@@ -97,7 +62,7 @@ end
 
 function RJuliaGet(key::AbstractString)
     try
-        eval(parse(key))
+        eval(Meta.parse(key))
     catch err
         conditionToR(string("In Get() with key = \"$key\": ", err))
     end
@@ -117,11 +82,11 @@ function RJuliaEval(expr::AbstractString, key::AbstractString = "", send = nothi
     try
         if key == ""
             what = "command"
-            eval(parse(expr))
+            eval(Meta.parse(expr))
             return nothing
         else
-            eval(parse(string(key, " = Rguard(", expr, ")")))
-            value = eval(parse(key))
+            eval(Meta.parse(string(key, " = Rguard(", expr, ")")))
+            value = eval(Meta.parse(key))
         end
     catch err
         msg = string("Evaluating Julia ", what, ": ", JSON.string(expr))
@@ -142,28 +107,63 @@ function RJuliaRemove(key)
 end
 
 function RJuliaQuit()
-    quit() # that's all follks!
+    exit() # that's all follks!
 end
 
+## options for Julia.  Anything can be set here via the R juliaOptions() function.  The values below will be
+## reset during the initialize() method for the evaluator.
+RJuliaParams = Dict{AbstractString, Any}("largeObject" => 1000, "fileBase" => "./juliaToR",
+       "fileBaseIndex" => 0)
+
+getVectorFile = function()
+    n = RJuliaParams["fileBaseIndex"] + 1
+    RJuliaParams["fileBaseIndex"] = n
+    string(RJuliaParams["fileBase"],"_",n)
+end
+
+function RJuliaSetParams(values::Dict{String, Any})
+    for what in keys(values)
+        RJuliaParams[what] = values[what]
+    end
+end
+
+function RJuliaGetParams(what::Array{String, 1})
+    value = Dict{String,Any}()
+    for key in what
+         if haskey(RJuliaParams, key)
+            value[key] = RJuliaParams[key]
+        else
+            value[key] = nothing
+        end
+    end
+    value
+end
+
+function RJuliaGetParams(what::String)
+    names = Array{String,1}(undef,1)
+    names[1] = what
+    RJuliaGetParams(names)
+end
+    
 ## the names in this table need to match the jlSendTask calls in  RJuliaConnect.R
 TaskFunctions = Dict{String, Function}( "get" => RJuliaGet,
                   "eval" => RJuliaEval,
-                 "remove" => RJuliaRemove, "quit" => RJuliaQuit)
-
+                 "remove" => RJuliaRemove, "quit" => RJuliaQuit,
+                   "params" => RJuliaSetParams)
 ## construct the representation of an R object of class InterfaceError
 function conditionToR(msg, err = nothing)
     if err != nothing
         ## would be better to capture the detailed error message somewhere?
-        write(STDERR, "Julia error: ")
-        showerror(STDERR, err)
-        write(STDERR, "\n")
+        write(stderr, "Julia error: ")
+        showerror(stderr, err)
+        write(stderr, "\n")
     end
     value = RObject("InterfaceError", "XR")
     value.slots = Dict{AbstractString, Any}("message" => msg) # could one derive expr from err object?
     value
 end
 
-RBasic = Union{Number, AbstractString, Bool, Void}
+    RBasic = Union{Number, AbstractString, Bool, Nothing}
 RUnconvertible = Union{DataType, Function}
 
 function treatAsProxy(object)
@@ -182,10 +182,10 @@ function objectOrProxy(key, value)
     end
 end
 
-type proxyForR
+mutable struct proxyForR
     key:: AbstractString
     serverClass:: AbstractString
-    length:: Int64
+    length:: Int
 end
 
 function proxyForR(key, value)
@@ -199,7 +199,7 @@ function proxyForR(key, value)
 end
 
 RName = Union{String} # placeholder for future change to AbstractString,or ....
-type RObject
+mutable struct RObject
     class::RName
     package::RName
     dataType::RName
@@ -235,7 +235,7 @@ end
 function toR(x)
     z = Dict{RName, Any}("serverClass" =>  string(typeof(x)))
     d = Dict{RName, Any}()
-    nn = fieldnames(x)
+    nn = fieldnames(typeof(x))
     for i in nn
         d[string(i)] = toR(getfield(x, i))
     end
@@ -263,14 +263,14 @@ toR(x::RBasic) = x
 
 toR(x::Symbol) = string(x)
 
-toR{T}(x::Array{T,1}) = toR(vectorR(x))
+toR(x::Array{T,1}) where T = toR(vectorR(x))
 
 
 function toR(x::Tuple)
     toR([x...])
 end
 
-function toR{T,TE}(x::Dict{T,TE})
+function toR(x::Dict{T,TE}) where {T,TE}
     xx = copy(x)
     for nn in keys(x)
         xx[nn] = toR(x[nn])
@@ -278,7 +278,7 @@ function toR{T,TE}(x::Dict{T,TE})
     xx
 end
 
-function toR{T,N}(x::Array{T,N})
+function toR(x::Array{T,N}) where {T,N}
     dims = size(x)
     ndim = length(dims)
     if ndim == 2
@@ -286,7 +286,7 @@ function toR{T,N}(x::Array{T,N})
     else
         Class = "array"
     end
-    dim = Array{Int64}(ndim)
+    dim = Array{Int}(undef, ndim)
     for i in 1:ndim
         dim[i] = dims[i]
     end
@@ -311,9 +311,15 @@ function vectorR(x)
     ## <TODO>  In order to handle Julia's scalar types with no R equivalent, there should be
     ## a mechanism here to set the "type" slot to the actual Julia typeStr, with
     ## a corresponding mechanism in the method for asROject(), ("vector_R", "JuliaInterface")
-    mm = Array{Bool}(0) # missing values
+    mm = Array{Bool}(undef, 0) # missing values
+    if length(x) > RJuliaParams["largeObject"]
+        if haskey(to_R_direct, rtype)
+        method = to_R_direct[rtype]
+        return method(rtype, x)
+        end
+    end
     if rtype == "list"
-        value = Array{Any}(size(x))
+        value = Array{Any}(undef, size(x))
         for i in 1:length(x)
             value[i] = toR(x[i])
         end
@@ -337,10 +343,38 @@ function vectorR(x)
     RObject("vector_R","XR", "S4", nothing, slots)
 end
 
+## functions for direct writing of long vectors
+function vector_R_binary(rtype, x)
+    if rtype == "logical" || rtype == "integer" # convert bool or Int64 to Int32
+        x = convert(forRTypes["integer"], x)
+    elseif rtype == "character"
+        function eos(xi::String) xi * "\0" end #need EOS to separate strings
+        x = map(eos, x)
+    end
+    file = getVectorFile()
+    ot = open(file, "w")
+    if rtype == "character"
+        for i in 1:length(x)
+              write(ot, x[i])
+        end
+        close(ot)
+    else 
+        write(file, x)
+    end
+    slots = Dict{RName, Any}("file" => file, "type" => rtype, "length" => length(x))
+    RObject("vector_R_direct","XR", "S4", nothing, slots)
+end
+
+to_R_direct = Dict{AbstractString, Any}(
+    "numeric" => vector_R_binary, "integer" => vector_R_binary,
+    "logical" => vector_R_binary, "character" => vector_R_binary)
+    
+
+
 function fieldNames(what::DataType)
     syms = fieldnames(what)
     n = length(syms)
-    fields = Array{String}(n)
+    fields = Array{String}(undef, n)
     for i in 1:n
         fields[i] = string(syms[i])
     end
@@ -356,4 +390,62 @@ function classInfo(what::DataType)
     end
      Dict{RName, Any}("fields" => fields, "readOnly" => readOnly )
 end
+
+## called from R when sending large vector
+function binaryRVector(file::AbstractString, vtype::AbstractString, length::Int)
+    if vtype == "character"
+        return readRStrings(file, length)
+    end
+    value = read!(file, Array{juliaTypes[vtype]}(undef, length))
+    if vtype == "logical"
+        bool = Array{Bool}(undef, length)
+        for i in 1:length
+            bool[i] = value[i] != 0
+        end
+        bool
+    elseif vtype == "integer"
+        convert(Array{Int,1}, value) # to be consistent with Julia, may be Int64
+    else
+        value
+    end
+ end
+
+function readRStrings(file::AbstractString, n::Int)
+    text = read(file,String)
+    value = convert(Array{String, 1}, split(text, '\0'))
+    Base.deleteat!(value, length(value)) # extra empty element
+    if length(value) != n
+        write(stderr, "Warning:  expected to read $n strings with EOS separaters; got $(length(value))")
+    end
+    value
+end
+
+function substrs(text, i, j)
+    function sub1(ii, jj) text[ii:jj] end
+    map(sub1, i, j)
+end
+
+function starts(lens)
+    last = 0
+    function thisend(len)
+       start = last +1
+       last = last + len
+       start
+       end
+    map(thisend, lens)
+end
+
+function ends(from, lens)
+    function plus(i,j) i+j-1 end
+    map(plus, from, lens)
+end
+
+function makeStringArray(text::String, lens)
+    ii = starts(lens)
+    jj = ends(ii, lens)
+    substrs(text, ii, jj)
+end
+
+ 
+
 end #module XRJulia
