@@ -1,6 +1,6 @@
 \name{XRjulia-package}
-\alias{XRjulia-package}
-\alias{XRjulia}
+\alias{XRJulia-package}
+\alias{XRJulia}
 \docType{package}
 \title{
   Structured Interface to Julia

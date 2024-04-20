@@ -1,12 +1,12 @@
-f39b36ebcc35a52892497793886fa87b *DESCRIPTION
+bfbd6bc0a5f2e331dd5ca1b49e8e9ada *DESCRIPTION
 d0143d048aaaa5b014d822769fcf08d3 *NAMESPACE
 69c4a64c9bab843b9d61d0ba7ace0228 *R/RJuliaConnect.R
 62bdce39a88658941bc250815d446ee5 *README.md
-0660adaf2a37877e795e843cc3fdcafe *build/vignette.rds
+3cada7b722227f62680a92271a73cab8 *build/vignette.rds
 04130b523467727e206bd0aac6c53f83 *inst/doc/Chapter_XRJulia.pdf
-bbc07ec72cddb8d28f1c2a7ab322f031 *inst/doc/dataTransfer.R
+46750e778a5cdb4d65c347f8e43df623 *inst/doc/dataTransfer.R
 10a9da9004b43c50a5ac5579b6f0336e *inst/doc/dataTransfer.Rmd
-e569b756254de415100a50bb024571fd *inst/doc/dataTransfer.html
+37b3721981f6e8cf0baceb6495f74dc6 *inst/doc/dataTransfer.html
 1e8e99cd328c679edba8929c45cf8bd1 *inst/julia/RJuliaJSON.jl
 d2f7cb8a4d3b1d0b4b317f49c0e31c33 *inst/julia/XRJulia.jl
 8f4d47a51d804f3edd0c6321a1d6e638 *inst/julia/testJSON.jl
@@ -22,7 +22,7 @@ c65b87b990f21fc0e8ac70ab5b405cf5 *inst/tests/timeDataTransfer.R
 00163395adace3605e6a70823695de84 *man/JuliaInterface-class.Rd
 2592d26eddb2f084c9f53565dace4b00 *man/JuliaObject-class.Rd
 1e9125d8d347020792c280dc8f7605cf *man/RJulia.Rd
-d4017cb4b887e8508c63e90194e86653 *man/XRjulia-package.Rd
+26340ab94dd8ac67cb5bde14b214e284 *man/XRjulia-package.Rd
 dd2649eed1e77d6faa28d776af3b41e3 *man/asServerObject-ANY-JuliaObject-method.Rd
 d3d943ccf850b5516f996a36c254f095 *man/findJulia.Rd
 dac19a255735e4acf5db68babd9a67c4 *man/from_Julia-class.Rd
